@@ -59,7 +59,7 @@ process get_qtl_tests_and_models {
         path testing_scheme
 
     output:
-        path "qtl_pairs.csv.gz", emit: pairs
+        path "qtls.csv.gz", emit: qtls
         path "qtl_tests.csv.gz", emit: tests
         path "qtl_models.csv.gz", emit: models
 
@@ -96,7 +96,7 @@ process get_qtl_tests_and_models {
         qtl_models[, k := NULL]
         qtl_tests[, k := NULL]
 
-        fwrite(qtls, "qtl_pairs.csv.gz")
+        fwrite(qtls, "qtls.csv.gz")
         fwrite(qtl_tests, "qtl_tests.csv.gz")
         fwrite(qtl_models, "qtl_models.csv.gz")
         """
@@ -121,7 +121,7 @@ process get_formulas_and_testing_scheme {
             linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp)
         )
 
-        testing_scheme <- data.table(
+        testing_scheme <- list(
             model         = c("gxe_linear", "dominance", "gxe_dxe_dominance"),
             reduced_model = c("linear", "linear", "gxe_dominance")
         )
@@ -212,10 +212,11 @@ process make_grm {
             --pvar $pvar \\
             --threads ${task.cpus} \\
             --memory ${task.memory.getMega()} \\
-            --not-chr "${meta.chr1} ${meta.chr2}" \
-            --read-freq $freq \
-            --out "grm_loco_${meta.id}" \
-            --maf 0.01 \
+            --not-chr ${meta.chr} \\
+            --chr-set ${params.n_chr} \\
+            --read-freq $freq \\
+            --out "grm_loco_${meta.id}" \\
+            --maf 0.01 \\
             --make-rel bin
         """
 }
@@ -321,10 +322,8 @@ process get_qtl_matrices {
         pheno_covar <- fread("${pheno_covar}")
         formulas <- readRDS("${formulas}")
         the_formula <- formulas[["${meta.model}"]]
-        snp1 <- get_snp("${meta.lead_snp_id1}")
-        snp2 <- get_snp("${meta.lead_snp_id2}")
-        df <- merge(pheno_covar, snp1[, .(snp1 = snp, individual)], by = "individual")
-        df <- merge(df, snp2[, .(snp2 = snp, individual)], by = "individual")
+        snp <- get_snp("${meta.lead_snp_id}")
+        df <- merge(pheno_covar, snp, by = "individual")
         df <- as.data.frame(df)
         rownames(df) <- df[["full_id"]]
         model_frame <- model.frame(the_formula, data = df)
@@ -469,8 +468,7 @@ process fit_lm {
         lrt_df <- attributes(ll_fit)[["df"]] - attributes(ll_reduced)[["df"]]
         pval <- pchisq(lrt_chisq, df = lrt_df, lower.tail = FALSE)
         ret <- list(
-            locus_id1 = "${meta.locus_id1}",
-            locus_id2 = "${meta.locus_id2}",
+            locus_id = "${meta.locus_id}",
             model = "${meta.model}",
             reduced_model = "${meta.reduced_model}",
             lrt_chisq = lrt_chisq,
@@ -509,6 +507,12 @@ process fit_lm_perm {
         library("data.table")
         set.seed(${seed})
 
+        permute_mat <- function(X, new_order) {
+            cols_to_permute <- grepl("snp", colnames(X))
+            X[,cols_to_permute] <- X[new_order, cols_to_permute]
+            return(X)
+        }
+
         mm_mat_full <- readRDS("${mm_matrices_full}")
         mm_mat_red <- readRDS("${mm_matrices_reduced}")
         pheno_covar <- fread("${pheno_covar}")
@@ -520,8 +524,10 @@ process fit_lm_perm {
         pheno_covar <- pheno_covar[match(rownames(X.mm), pheno_covar[["full_id"]])]
         stopifnot(all(pheno_covar[["full_id"]] == rownames(X.mm)))
         pheno_covar[, n := 1:.N]
+        # permute within crosses and temperatures only columns containing genetic information
         new_order <- pheno_covar[, .(n, n_new = sample(n)), by = c("cross_id", "temperature")][order(n), n_new]
-        y.mm <- y.mm[new_order]
+        X.mm <- permute_mat(X.mm, new_order)
+        X_reduced.mm <- permute_mat(X_reduced.mm, new_order)
         stopifnot(
             all(pheno_covar[new_order, sprintf("%s_%s", cross_id, temperature)] == pheno_covar[, sprintf("%s_%s", cross_id, temperature)])
         )
@@ -535,8 +541,7 @@ process fit_lm_perm {
         lrt_df <- attributes(ll_fit)[["df"]] - attributes(ll_reduced)[["df"]]
         pval <- pchisq(lrt_chisq, df = lrt_df, lower.tail = FALSE)
         ret <- list(
-            locus_id1 = "${meta.locus_id1}",
-            locus_id2 = "${meta.locus_id2}",
+            locus_id = "${meta.locus_id}",
             model = "${meta.model}",
             reduced_model = "${meta.reduced_model}",
             permutation_seed = ${seed},
@@ -613,73 +618,73 @@ workflow {
     get_formulas_and_testing_scheme.out.formulas.set { formulas }
     get_formulas_and_testing_scheme.out.testing_scheme.set { testing_scheme }
     get_qtl_tests_and_models ( params.qtls, formulas, testing_scheme )
-    //get_qtl_tests_and_models.out.pairs
-    //    .splitCsv ( header: true )
-    //    .map {
-    //        it.id = it.locus_id1 + "_" + it.locus_id2
-    //        return ( it )
-    //    }
-    //    .set { qtl_pairs }
-    //get_qtl_tests_and_models.out.models
-    //    .splitCsv ( header: true )
-    //    .map {
-    //        it.id = it.locus_id1 + "_" + it.locus_id2 + "_" + it.model
-    //        return ( it )
-    //    }
-    //    .set { qtl_models }
-    //get_qtl_tests_and_models.out.tests
-    //    .splitCsv ( header: true )
-    //    .map {
-    //        it.id = it.locus_id1 + "_" + it.locus_id2 + "_" + it.model + "_" + it.reduced_model
-    //        return ( it )
-    //    }
-    //    .set { qtl_tests }
-    //make_freq ( params.freq )
-    //make_pgen ( params.vcf )
-    //qtl_pairs.combine ( make_pgen.out ).combine ( make_freq.out ).set { make_grm_in_ch }
-    //make_grm ( make_grm_in_ch )
-    //make_grm.out
-    //    .map { meta, id, bin -> [[meta.locus_id1, meta.locus_id2], meta, id, bin] }
-    //    .combine ( qtl_models.map { meta -> [[meta.locus_id1, meta.locus_id2], meta] }, by: 0 )
-    //    .map { match_tuple, meta1, id, bin, meta2 -> [meta2, id, bin] }
-    //    .combine ( read_pheno_covar.out )
-    //    .combine ( make_pgen.out )
-    //    .combine ( formulas )
-    //    .set { get_qtl_matrices_in_ch }
-    //get_qtl_matrices ( get_qtl_matrices_in_ch )
-    //get_qtl_matrices.out
-    //    // fit variance components only on the background model
-    //    .filter { meta, qtl_mat -> meta.model == "gxe" }
-    //    .set { fit_mixed_model_in_ch }
-    //fit_mixed_model ( fit_mixed_model_in_ch )
-    //fit_mixed_model.out
-    //    .map { meta, mm -> [[meta.locus_id1, meta.locus_id2], mm] }
-    //    .combine ( get_qtl_matrices.out.map { meta, qtl_mat -> [[meta.locus_id1, meta.locus_id2], meta, qtl_mat] }, by: 0 )
-    //    .map { match_tuple, mm, meta, qtl_mat -> [meta, qtl_mat, mm] }
-    //    .set { decorrelate_matrices_in_ch }
-    //decorrelate_matrices ( decorrelate_matrices_in_ch )
-    //qtl_tests.map { meta -> [[meta.locus_id1, meta.locus_id2, meta.model], meta] }.set { full_models }
-    //qtl_tests.map { meta -> [[meta.locus_id1, meta.locus_id2, meta.reduced_model], meta] }.set { reduced_models }
-    //decorrelate_matrices.out.map { meta, mm_mat -> [[meta.locus_id1, meta.locus_id2, meta.model], meta, mm_mat] }.set { mm_mat_to_merge }
-    //full_models.combine ( mm_mat_to_merge, by: 0 ).map { match_tuple, meta1, meta2, mm_mat -> [meta1, mm_mat]}.set { full_models_mm_mat }
-    //reduced_models.combine ( mm_mat_to_merge, by: 0 ).map { match_tuple, meta1, meta2, mm_mat -> [meta1, mm_mat]}.set { reduced_models_mm_mat }
-    //full_models_mm_mat.combine ( reduced_models_mm_mat, by: 0 ).set { fit_lm_in_ch }
-    //fit_lm ( fit_lm_in_ch )
-    //Channel.of ( 1..params.n_perm ).set { perm_seeds }
-    //fit_lm_in_ch
-    //    .combine ( read_pheno_covar.out )
-    //    .combine ( perm_seeds )
-    //    .map {
-    //        meta, mm_mat1, mm_mat2, pheno_covar, seed ->
-    //        newmeta = meta.clone()
-    //        newmeta.id = meta.locus_id1 + "_" + meta.locus_id2 + "_" + meta.model + "_" + meta.reduced_model + "_perm" + seed
-    //        newmeta.seed = seed
-    //        [newmeta, mm_mat1, mm_mat2, pheno_covar, seed] 
-    //    }
-    //    .set { fit_lm_perm_in_ch }
-    //fit_lm_perm ( fit_lm_perm_in_ch )
-    //fit_lm.out.map { meta, fit -> fit }.collect().set { get_result_table_in_ch }
-    //fit_lm_perm.out.map { meta, fit -> fit }.collect().set { get_result_table_perm_in_ch }
-    //get_result_table ( get_result_table_in_ch )
-    //get_result_table_perm ( get_result_table_perm_in_ch )
+    get_qtl_tests_and_models.out.qtls
+        .splitCsv ( header: true )
+        .map {
+            it.id = it.locus_id
+            return ( it )
+        }
+        .set { qtls }
+    get_qtl_tests_and_models.out.models
+        .splitCsv ( header: true )
+        .map {
+            it.id = it.locus_id + "_" + it.model
+            return ( it )
+        }
+        .set { qtl_models }
+    get_qtl_tests_and_models.out.tests
+        .splitCsv ( header: true )
+        .map {
+            it.id = it.locus_id + "_" + it.model + "_" + it.reduced_model
+            return ( it )
+        }
+        .set { qtl_tests }
+    make_freq ( params.freq )
+    make_pgen ( params.vcf )
+    qtls.combine ( make_pgen.out ).combine ( make_freq.out ).set { make_grm_in_ch }
+    make_grm ( make_grm_in_ch )
+    make_grm.out
+        .map { meta, id, bin -> [meta.locus_id, meta, id, bin] }
+        .combine ( qtl_models.map { meta -> [meta.locus_id, meta] }, by: 0 )
+        .map { match_tuple, meta1, id, bin, meta2 -> [meta2, id, bin] }
+        .combine ( read_pheno_covar.out )
+        .combine ( make_pgen.out )
+        .combine ( formulas )
+        .set { get_qtl_matrices_in_ch }
+    get_qtl_matrices ( get_qtl_matrices_in_ch )
+    get_qtl_matrices.out
+        // fit variance components only on the background model
+        .filter { meta, qtl_mat -> meta.model == "linear" }
+        .set { fit_mixed_model_in_ch }
+    fit_mixed_model ( fit_mixed_model_in_ch )
+    fit_mixed_model.out
+        .map { meta, mm -> [meta.locus_id, mm] }
+        .combine ( get_qtl_matrices.out.map { meta, qtl_mat -> [meta.locus_id, meta, qtl_mat] }, by: 0 )
+        .map { match_tuple, mm, meta, qtl_mat -> [meta, qtl_mat, mm] }
+        .set { decorrelate_matrices_in_ch }
+    decorrelate_matrices ( decorrelate_matrices_in_ch )
+    qtl_tests.map { meta -> [[meta.locus_id, meta.model], meta] }.set { full_models }
+    qtl_tests.map { meta -> [[meta.locus_id, meta.reduced_model], meta] }.set { reduced_models }
+    decorrelate_matrices.out.map { meta, mm_mat -> [[meta.locus_id, meta.model], meta, mm_mat] }.set { mm_mat_to_merge }
+    full_models.combine ( mm_mat_to_merge, by: 0 ).map { match_tuple, meta1, meta2, mm_mat -> [meta1, mm_mat]}.set { full_models_mm_mat }
+    reduced_models.combine ( mm_mat_to_merge, by: 0 ).map { match_tuple, meta1, meta2, mm_mat -> [meta1, mm_mat]}.set { reduced_models_mm_mat }
+    full_models_mm_mat.combine ( reduced_models_mm_mat, by: 0 ).set { fit_lm_in_ch }
+    fit_lm ( fit_lm_in_ch )
+    Channel.of ( 1..params.n_perm ).set { perm_seeds }
+    fit_lm_in_ch
+        .combine ( read_pheno_covar.out )
+        .combine ( perm_seeds )
+        .map {
+            meta, mm_mat1, mm_mat2, pheno_covar, seed ->
+            newmeta = meta.clone()
+            newmeta.id = meta.locus_id + "_" + meta.model + "_" + meta.reduced_model + "_perm" + seed
+            newmeta.seed = seed
+            [newmeta, mm_mat1, mm_mat2, pheno_covar, seed] 
+        }
+        .set { fit_lm_perm_in_ch }
+    fit_lm_perm ( fit_lm_perm_in_ch )
+    fit_lm.out.map { meta, fit -> fit }.collect().set { get_result_table_in_ch }
+    fit_lm_perm.out.map { meta, fit -> fit }.collect().set { get_result_table_perm_in_ch }
+    get_result_table ( get_result_table_in_ch )
+    get_result_table_perm ( get_result_table_perm_in_ch )
 }

@@ -508,7 +508,7 @@ process fit_lm_perm {
         set.seed(${seed})
 
         permute_mat <- function(X, new_order) {
-            cols_to_permute <- grepl("snp", colnames(X))
+            cols_to_permute <- grepl("(snp|dominance)", colnames(X))
             X[,cols_to_permute] <- X[new_order, cols_to_permute]
             return(X)
         }

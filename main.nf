@@ -2,7 +2,7 @@
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-GxG detection heart_rate_tmp
+GxE detection heart_rate_tmp
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Author: Saul Pierotti
 Mail: saul@ebi.ac.uk
@@ -43,7 +43,20 @@ process read_pheno_covar {
         # the kronoecker product creates id of the kind individual:temperature
         pheno[, full_id := sprintf("%s:%s", individual, temperature)]
 
-        covar <- covar[, .(individual = IID, phenotyping_plate_id, cross_id)]
+        covar <- covar[, .(
+            individual = IID,
+            phenotyping_plate_id,
+            cross_id,
+            chr15_qtl = ifelse(
+                chr15_qtl == 1, "het",
+                ifelse(
+                    chr15_qtl == 0, "hom_ref",
+                    ifelse(
+                        chr15_qtl == 2, "hom_alt", NA
+                    )
+                )
+            )
+        )]
 
         df <- merge(pheno, covar, by = "individual")
         fwrite(df, "pheno_covar.csv.gz")
@@ -114,11 +127,11 @@ process get_formulas_and_testing_scheme {
         #!/usr/bin/env Rscript
 
         formulas <- list(
-            gxe_dxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + dominance:temperature),
-            gxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature),
-            gxe_linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + snp:temperature),
-            dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance),
-            linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp)
+            gxe_dxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + dominance:temperature + chr15_qtl*temperature),
+            gxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + chr15_qtl*temperature),
+            gxe_linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + snp:temperature + chr15_qtl*temperature),
+            dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + chr15_qtl*temperature),
+            linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + chr15_qtl*temperature)
         )
 
         testing_scheme <- list(
@@ -322,6 +335,9 @@ process get_qtl_matrices {
         pheno_covar <- fread("${pheno_covar}")
         formulas <- readRDS("${formulas}")
         the_formula <- formulas[["${meta.model}"]]
+        if ( "${meta.locus_id}" == "chr15_qtl" ) {
+            the_formula <- update.formula(the_formula, . ~ . - chr15_qtl - chr15_qtl:temperature)
+        }
         snp <- get_snp("${meta.lead_snp_id}")
         df <- merge(pheno_covar, snp, by = "individual")
         df <- as.data.frame(df)

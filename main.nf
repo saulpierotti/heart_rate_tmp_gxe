@@ -599,6 +599,47 @@ process get_result_table {
         """
 }
 
+process get_beta_table {
+    label "r_tidyverse_datatable"
+
+    input:
+        path lm_fits
+
+    output:
+        path "beta.csv.gz"
+
+    script:
+        """
+        #!/usr/bin/env Rscript
+
+        library("data.table")
+
+        the_files <- list.files(pattern = ".*.lm_fit.rds")
+        stopifnot(length(the_files) == ${lm_fits.size()})
+
+        read_file <- function(f) {
+            tmp <- readRDS(f)
+            ret <- summary(tmp[["fit"]]) |> coef() |> as.data.table(keep.rownames = TRUE)
+            ret <- ret[
+                , .(
+                    locus = tmp[["locus_id"]],
+                    var = str_remove_all(rn, "`"),
+                    beta = Estimate,
+                    std_err = `Std. Error`,
+                    t_val = `t value`, 
+                    pval = `Pr(>|t|)`
+                )
+            ][
+                grepl("(snp|dominance|^temperature..C)", var)
+            ]
+            return(ret)
+        }
+
+        df <- lapply(the_files, read_file) |> rbindlist()
+        fwrite(df, "beta.csv.gz")
+        """
+}
+
 process get_result_table_perm {
     label "r_tidyverse_datatable"
 
@@ -701,6 +742,7 @@ workflow {
     fit_lm_perm ( fit_lm_perm_in_ch )
     fit_lm.out.map { meta, fit -> fit }.collect().set { get_result_table_in_ch }
     fit_lm_perm.out.map { meta, fit -> fit }.collect().set { get_result_table_perm_in_ch }
+    get_beta_table ( get_result_table_in_ch )
     get_result_table ( get_result_table_in_ch )
     get_result_table_perm ( get_result_table_perm_in_ch )
 }

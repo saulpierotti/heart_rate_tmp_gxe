@@ -614,6 +614,7 @@ process get_beta_table {
         #!/usr/bin/env Rscript
 
         library("data.table")
+        library("tidyverse")
 
         the_files <- list.files(pattern = ".*.lm_fit.rds")
         stopifnot(length(the_files) == ${lm_fits.size()})
@@ -627,7 +628,7 @@ process get_beta_table {
                     var = str_remove_all(rn, "`"),
                     beta = Estimate,
                     std_err = `Std. Error`,
-                    t_val = `t value`, 
+                    t_val = `t value`,
                     pval = `Pr(>|t|)`
                 )
             ][

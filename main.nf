@@ -97,7 +97,7 @@ process get_qtl_tests_and_models {
             allow.cartesian = TRUE,
             by = "k"
         )
-        
+
         qtl_tests <- merge(
             qtls[, k := ""],
             testing_scheme[, k := ""],
@@ -131,12 +131,13 @@ process get_formulas_and_testing_scheme {
             gxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + chr15_qtl*temperature),
             gxe_linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + snp:temperature + chr15_qtl*temperature),
             dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + chr15_qtl*temperature),
-            linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + chr15_qtl*temperature)
+            linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + chr15_qtl*temperature),
+            base = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + chr15_qtl*temperature)
         )
 
         testing_scheme <- list(
-            model         = c("gxe_linear", "dominance", "gxe_dxe_dominance"),
-            reduced_model = c("linear", "linear", "gxe_dominance")
+            model         = c("gxe_linear", "dominance", "gxe_dxe_dominance", "linear"),
+            reduced_model = c("base", "base", "base", "base")
         )
 
         saveRDS(formulas, "formulas.rds")
@@ -297,10 +298,10 @@ process get_qtl_matrices {
             # get a block diagonal square matrix with n_samples rows and columns and
             # 1 for samples in the same group, 0 for samples in different groups
             K <- Z %*% t(Z)
-            
+
             match_v <- match(rownames(model_frame), rownames(K))
             K <- K[match_v, match_v]
-            
+
             return(K)
         }
 
@@ -695,7 +696,7 @@ workflow {
             newmeta = meta.clone()
             newmeta.id = meta.locus_id + "_" + meta.model + "_" + meta.reduced_model + "_perm" + seed
             newmeta.seed = seed
-            [newmeta, mm_mat1, mm_mat2, pheno_covar, seed] 
+            [newmeta, mm_mat1, mm_mat2, pheno_covar, seed]
         }
         .set { fit_lm_perm_in_ch }
     fit_lm_perm ( fit_lm_perm_in_ch )

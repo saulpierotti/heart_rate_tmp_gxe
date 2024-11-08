@@ -86,11 +86,6 @@ process get_qtl_tests_and_models {
         formulas <- readRDS("${formulas}")
         testing_scheme <- readRDS("${testing_scheme}") |> as.data.table()
 
-        qtls <- qtls[
-            qtl_type == "temp" & well_behaved == "yes",
-            .(locus_id, chr, lead_snp_id)
-        ]
-
         qtl_models <- merge(
             qtls[, k := ""],
             data.table(model = names(formulas), k = ""),

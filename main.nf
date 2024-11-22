@@ -40,6 +40,11 @@ process read_pheno_covar {
             variable.name = "temperature"
         )
         pheno[, temperature := str_remove(temperature, "heart_rate_avg_")]
+
+        # a box-cox fit on heart_rate ~ temperature indicates ~0.14 as best lambda
+        # so I use a transformation in the nearest integer lambda = 0, which is a log transformation
+        # this is to reduce residual heteroschedasticity
+        pheno[, heart_rate_trans := log(heart_rate)]
         # the kronoecker product creates id of the kind individual:temperature
         pheno[, full_id := sprintf("%s:%s", individual, temperature)]
 
@@ -122,12 +127,12 @@ process get_formulas_and_testing_scheme {
         #!/usr/bin/env Rscript
 
         formulas <- list(
-            gxe_dxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + dominance:temperature + chr15_qtl*temperature),
-            gxe_dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + chr15_qtl*temperature),
-            gxe_linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + snp:temperature + chr15_qtl*temperature),
-            dominance = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + chr15_qtl*temperature),
-            linear = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + chr15_qtl*temperature),
-            base = formula(heart_rate ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + chr15_qtl*temperature)
+            gxe_dxe_dominance = formula(heart_rate_trans ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + dominance:temperature + chr15_qtl*temperature),
+            gxe_dominance = formula(heart_rate_trans ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + snp:temperature + chr15_qtl*temperature),
+            gxe_linear = formula(heart_rate_trans ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + snp:temperature + chr15_qtl*temperature),
+            dominance = formula(heart_rate_trans ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + dominance + chr15_qtl*temperature),
+            linear = formula(heart_rate_trans ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + snp + chr15_qtl*temperature),
+            base = formula(heart_rate_trans ~ 1 + cross_id*temperature + phenotyping_plate_id + temperature + chr15_qtl*temperature)
         )
 
         testing_scheme <- list(
